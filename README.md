@@ -125,6 +125,16 @@ PERP_SYMBOL=ETH/USDT:USDT
 
 ---
 
+## MMT / M5 als MCP-Server (Claude Code)
+
+Die Datei `.mcp.json` bindet den MCP-Server von M5 (`https://app.mmt.gg/api/mcp`) ein. Der Token steht **nicht** im Repo, sondern kommt aus der Umgebungsvariable `M5_MCP_TOKEN`:
+
+1. Token unter https://app.mmt.gg/settings/mcp erstellen (Preset "Full control", beginnt mit `m5_mcp_`).
+2. `M5_MCP_TOKEN=m5_mcp_...` als Umgebungsvariable setzen (lokal z. B. per `export`, in Claude Code im Web als Secret der Umgebung).
+3. Claude Code neu starten und den Server `m5` bestaetigen; Test mit `m5_get_status`.
+
+---
+
 ## Ausgabe verstehen
 
 Das Dashboard ist in 3 Spalten aufgebaut:

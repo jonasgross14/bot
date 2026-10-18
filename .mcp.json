@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "m5": {
+      "type": "http",
+      "url": "https://app.mmt.gg/api/mcp",
+      "headers": {
+        "Authorization": "Bearer ${M5_MCP_TOKEN}"
+      }
+    }
+  }
+}
