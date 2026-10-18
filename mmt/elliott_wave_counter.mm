@@ -2,9 +2,13 @@ script "Elliott Wave Counter (ATR ZigZag)"
 
 // ============================================================
 //  Elliott-Wave-Zaehler, eine Wellenebene: Impuls 1-5, Korrektur a-b-c.
+//  Zusaetzlich: eigenstaendige Zigzag-Korrekturen A-B-C und Kombinationen
+//  W-X-Y. Ein A-B-C steht erst fest, wenn "Welle 4" das Gebiet von
+//  "Welle 1" ueberlappt; der Impuls wird dann sichtbar ungueltig (grau, X)
+//  und dieselben Pivots bekommen zusaetzlich die Labels A-B-C.
 //  Basis: ZigZag mit ATR-Schwelle. Gezaehlt wird nur auf bestaetigten
-//  Bars (on chart.close); ein einmal gesetztes Label auf einem
-//  bestaetigten Pivot wird nie verschoben oder umbenannt.
+//  Bars (on chart.close); ein einmal gesetztes Label wird nie verschoben
+//  oder umbenannt.
 // ============================================================
 
 input (
@@ -15,22 +19,31 @@ input (
   atrMult = input.float(3.0, title: "ATR-Multiplikator", min: 0.5, max: 20.0)
   // Ungueltige (gebrochene) Zaehlungen grau sichtbar lassen
   showInvalid = input.bool(true, title: "Ungueltige Zaehlungen anzeigen")
+  // Eigenstaendige Korrekturen A-B-C und W-X-Y erkennen und beschriften
+  showCorrections = input.bool(true, title: "Korrekturen A-B-C / W-X-Y anzeigen")
   // Fenster fuer den Zaehler "ungueltige Zaehlungen" in der Statusanzeige.
   // Das Skript kennt den sichtbaren Chartbereich nicht, daher Bars zurueck.
   invalidWindow = input.int(500, title: "Ungueltig-Zaehler: letzte N Bars", min: 10, max: 100000)
   // Schriftgroesse der Wellen-Labels
-  labelSize = input.float(13.0, title: "Label-Groesse", min: 6.0, max: 40.0)
+  labelSize = input.float(18.0, title: "Label-Groesse", min: 6.0, max: 40.0)
   // Farben
   colImpulse = input.color(color.rgb(41, 121, 255), title: "Farbe Impuls")
   colCorr = input.color(color.rgb(255, 152, 0), title: "Farbe Korrektur")
   colInvalid = input.color(color.rgb(120, 123, 134), title: "Farbe ungueltig")
   colBreak = input.color(color.rgb(242, 54, 69), title: "Farbe Bruchpunkt (X)")
+  colCombo = input.color(color.rgb(171, 71, 188), title: "Farbe W-X-Y")
 )
 
 data chart = subscribe(data.ohlcv)
 
 type WavePayload {
   wave: string
+  price: float
+  direction: string
+}
+
+type PatternPayload {
+  pattern: string
   price: float
   direction: string
 }
@@ -43,6 +56,7 @@ type InvalidPayload {
 alert (
   waveDone = alert(title: "EW: Welle bestaetigt", payload: WavePayload, onClose: true)
   countInvalid = alert(title: "EW: Zaehlung ungueltig", payload: InvalidPayload, onClose: true)
+  patternDone = alert(title: "EW: Korrektur erkannt (A-B-C / W-X-Y)", payload: PatternPayload, onClose: true)
 )
 
 state (
@@ -52,7 +66,7 @@ state (
   marks = entities.markerPool(max: 200)
   provLine = entities.linePool(max: 1)    // vorlaeufiger Schenkel, eigener Pool
   provLabel = entities.labelPool(max: 1)
-  hud = entities.labelPool(max: 6, anchor: anchor.topRight)
+  hud = entities.labelPool(max: 7, anchor: anchor.topRight)
 
   // --- ZigZag ---
   zzDir: int = 0              // 0 = Start, 1 = Schenkel steigt, -1 = Schenkel faellt
@@ -70,6 +84,8 @@ state (
   lastT: time? = null
   lastI: int = 0
   lastIsHigh: bool = false
+  pivSeq: int = 0             // laufende Nummer der bestaetigten Pivots
+  lastSeq: int = 0
 
   // --- Laufende Zaehlung: Punkte P0..P8 (0, 1..5, a, b, c) ---
   active: bool = false
@@ -79,6 +95,18 @@ state (
   cntY = float[](9)           // Label-Position (Preis + Abstand), festgeschrieben
   cntT = time[](9)
   cntI = int[](9)
+  cntS = int[](9)             // Pivot-Nummern der Punkte
+
+  // --- Letzte eigenstaendige Korrektur (Kandidat fuer W einer W-X-Y) ---
+  pcActive: bool = false
+  pcBull: bool = true         // true = Korrektur aufwaerts
+  pcStartP: float = 0.0
+  pcEndSeq: int = 0
+  pcEndP: float = 0.0
+  pcEndT: time? = null
+  pcEndY: float = 0.0
+  pcId: int = 0
+  lastPattern: string = "-"
 
   // --- Score (Richtwerte, nie Ausschluss) ---
   scorePts: float = 0.0
@@ -116,7 +144,7 @@ fn bandScore(v: float, lo: float, hi: float, tol: float, pts: float) -> float {
   return math.max(0.0, pts * (1.0 - dist / tol))
 }
 
-fn startCount(p: float, t: time, i: int, isHigh: bool) {
+fn startCount(p: float, t: time, i: int, isHigh: bool, seq: int) {
   countId += 1
   active = true
   bull = !isHigh
@@ -124,6 +152,8 @@ fn startCount(p: float, t: time, i: int, isHigh: bool) {
   cntY.clear()
   cntT.clear()
   cntI.clear()
+  cntS.clear()
+  cntS.push(seq)
   cntP.push(p)
   cntY.push(p)
   cntT.push(t)
@@ -160,10 +190,72 @@ fn invalidate(t: time, price: float, rule: string) {
   active = false
 }
 
+// Gebrochener Impuls mit Ueberlappung in Welle 4: P0..P3 als Zigzag A-B-C
+// beschriften (B nicht ueber den Start von A hinaus, C ueber das Ende von A).
+// Folgt direkt nach einem A-B-C ein X-Schenkel und ein zweites A-B-C in
+// dieselbe Richtung, werden W, X und Y zusaetzlich gesetzt.
+fn markCorrection(t: time) {
+  if !showCorrections || cntP.len < 4 {
+    return
+  }
+  let s = bull ? 1.0 : -1.0
+  let p0 = cntP[0] ?? 0.0
+  let p1 = cntP[1] ?? 0.0
+  let p2 = cntP[2] ?? 0.0
+  let p3 = cntP[3] ?? 0.0
+  if s * (p2 - p0) < 0.0 || s * (p3 - p1) <= 0.0 {
+    return
+  }
+  for n in 1..4 {
+    let p = cntP[n]
+    let y = cntY[n]
+    let tt = cntT[n]
+    let pp = cntP[n - 1]
+    let t0 = cntT[n - 1]
+    if p != null && y != null && tt != null && pp != null && t0 != null {
+      let yc = p + (y - p) * 2.2
+      let name = n == 1 ? "A" : n == 2 ? "B" : "C"
+      labels.get("C", countId, n).set(tt, yc, name, color: colCorr, size: labelSize)
+      lines.get("CW", countId, n).set(t0, pp, tt, p, width: 1.5, color: colCorr, zIndex: 1)
+    }
+  }
+  let dirTxt = bull ? "aufwaerts" : "abwaerts"
+  let seq0 = cntS[0] ?? 0
+  let t3 = cntT[3]
+  let y3 = cntY[3]
+  let t0c = cntT[0]
+  let y0 = cntY[0]
+  let isCombo = pcActive && pcBull == bull && seq0 == pcEndSeq + 1 && s * (p0 - pcStartP) > 0.0
+  if isCombo {
+    let wt = pcEndT
+    if wt != null && t3 != null && y3 != null && t0c != null && y0 != null {
+      // X liegt auf P0 der zweiten Korrektur; Label auf der Gegenseite
+      let yx = bull ? p0 - math.abs(pcEndY - pcEndP) * 2.2 : p0 + math.abs(pcEndY - pcEndP) * 2.2
+      labels.get("WXY", pcId, 1).set(wt, pcEndP + (pcEndY - pcEndP) * 3.6, "W", color: colCombo, size: labelSize + 2.0)
+      labels.get("WXY", pcId, 2).set(t0c, yx, "X", color: colCombo, size: labelSize + 2.0)
+      labels.get("WXY", pcId, 3).set(t3, p3 + (y3 - p3) * 3.6, "Y", color: colCombo, size: labelSize + 2.0)
+      lastPattern = str.concat("W-X-Y ", dirTxt)
+      patternDone.trigger(PatternPayload { pattern: "W-X-Y", price: p3, direction: dirTxt })
+    }
+    pcActive = false
+    return
+  }
+  pcActive = true
+  pcBull = bull
+  pcStartP = p0
+  pcEndSeq = cntS[3] ?? 0
+  pcEndP = p3
+  pcEndT = t3
+  pcEndY = y3 ?? p3
+  pcId = countId
+  lastPattern = str.concat("A-B-C ", dirTxt)
+  patternDone.trigger(PatternPayload { pattern: "A-B-C", price: p3, direction: dirTxt })
+}
+
 // Neuer bestaetigter Pivot: als naechste Welle der laufenden Zaehlung pruefen.
-fn onPivot(p: float, t: time, i: int, isHigh: bool, atr: float) {
+fn onPivot(p: float, t: time, i: int, isHigh: bool, atr: float, seq: int) {
   if !active {
-    startCount(p, t, i, isHigh)
+    startCount(p, t, i, isHigh, seq)
     return
   }
   let s = bull ? 1.0 : -1.0
@@ -197,7 +289,10 @@ fn onPivot(p: float, t: time, i: int, isHigh: bool, atr: float) {
   }
   if broken != "" {
     invalidate(t, p, broken)
-    startCount(p, t, i, isHigh)
+    if n == 4 {
+      markCorrection(t)
+    }
+    startCount(p, t, i, isHigh, seq)
     return
   }
 
@@ -207,6 +302,7 @@ fn onPivot(p: float, t: time, i: int, isHigh: bool, atr: float) {
   cntY.push(y)
   cntT.push(t)
   cntI.push(i)
+  cntS.push(seq)
   let prevP = cntP[n - 1] ?? p
   let prevT = cntT[n - 1] ?? t
   labels.get("L", countId, n).set(t, y, waveName(n), color: waveColor(n), size: labelSize)
@@ -244,7 +340,7 @@ fn onPivot(p: float, t: time, i: int, isHigh: bool, atr: float) {
   // --- Nach c: Zaehlung abgeschlossen, neue Suche ab c ---
   if n == 8 {
     active = false
-    startCount(p, t, i, isHigh)
+    startCount(p, t, i, isHigh, seq)
   }
 }
 
@@ -280,10 +376,13 @@ fn checkRunning(t: time, lo: float, hi: float) {
   }
   if broken != "" {
     invalidate(t, at, broken)
+    if k == 3 {
+      markCorrection(t)
+    }
     if hasLast {
       let lt = lastT
       if lt != null {
-        startCount(lastP, lt, lastI, lastIsHigh)
+        startCount(lastP, lt, lastI, lastIsHigh, lastSeq)
       }
     }
   }
@@ -411,7 +510,9 @@ on chart.close {
     lastT = pvT
     lastI = pvI
     lastIsHigh = pvHigh
-    onPivot(pvP, pvT, pvI, pvHigh, atrV)
+    pivSeq += 1
+    lastSeq = pivSeq
+    onPivot(pvP, pvT, pvI, pvHigh, atrV, pivSeq)
   }
   checkRunning(t, l, h)
 
@@ -445,9 +546,11 @@ on chart.close {
   let scoreTxt = scoreMax > 0.0 ?
     str.format("{0:.0} / 100 ({1:.0} von 4 Richtwerten)", scorePts / scoreMax * 100.0, scoreMax / 25.0) :
     "- (noch keine Richtwerte)"
-  hud.get(0).set(12.0, 12.0, str.concat("Elliott Wave · ", dirTxt), size: 13.0, font: font.mono)
-  hud.get(1).set(12.0, 30.0, str.concat("Welle: ", waveTxt), size: 12.0, font: font.mono)
-  hud.get(2).set(12.0, 46.0, str.concat("Invalidierung: ", lvlTxt), size: 12.0, font: font.mono)
-  hud.get(3).set(12.0, 62.0, str.concat("Score: ", scoreTxt), size: 12.0, font: font.mono)
-  hud.get(4).set(12.0, 78.0, str.format("Ungueltige Zaehlungen: {0} (letzte {1} Bars)", invCount, invalidWindow), size: 12.0, font: font.mono)
+  // Start 40 px unter dem Rand, damit die Chart-Buttons oben rechts frei bleiben
+  hud.get(0).set(12.0, 40.0, str.concat("Elliott Wave · ", dirTxt), size: 13.0, font: font.mono)
+  hud.get(1).set(12.0, 58.0, str.concat("Welle: ", waveTxt), size: 12.0, font: font.mono)
+  hud.get(2).set(12.0, 74.0, str.concat("Invalidierung: ", lvlTxt), size: 12.0, font: font.mono)
+  hud.get(3).set(12.0, 90.0, str.concat("Score: ", scoreTxt), size: 12.0, font: font.mono)
+  hud.get(4).set(12.0, 106.0, str.format("Ungueltige Zaehlungen: {0} (letzte {1} Bars)", invCount, invalidWindow), size: 12.0, font: font.mono)
+  hud.get(5).set(12.0, 122.0, str.concat("Letzte Korrektur: ", lastPattern), size: 12.0, font: font.mono)
 }
