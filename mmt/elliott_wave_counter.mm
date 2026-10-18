@@ -3,7 +3,7 @@ script "Elliott Wave Counter (ATR ZigZag)"
 // ============================================================
 //  Elliott-Wave-Zaehler mit zwei unabhaengigen Wellenebenen:
 //    Ebene 1 (klein): 1-5, a-b-c, A-B-C, W-X-Y
-//    Ebene 2 (gross): (1)-(5) eingekreist, Ⓐ-Ⓑ-Ⓒ, Ⓦ-Ⓧ-Ⓨ
+//    Ebene 2 (gross): [1]-[5], [a]-[c], [A]-[C], [W]-[X]-[Y]
 //  Jede Ebene hat ihren eigenen ATR-ZigZag und zaehlt nach denselben
 //  Regeln: Impuls 1-5, danach a-b-c. Eigenstaendige Zigzag-Korrekturen
 //  A-B-C stehen erst fest, wenn "Welle 4" das Gebiet von "Welle 1"
@@ -24,9 +24,10 @@ input (
   atrMult = input.float(3.0, title: "Ebene 1 (klein): ATR-Multiplikator", min: 0.5, max: 50.0)
   // Ebene 2 ein/aus
   showLevel2 = input.bool(true, title: "Ebene 2 (gross) anzeigen")
-  // Ebene 2: deutlich groesser als Ebene 1 waehlen. 15 trifft auf 5m die
-  // grossen Wellen (Hauptpivots) einer typischen Analysten-Zaehlung.
-  atrMult2 = input.float(15.0, title: "Ebene 2 (gross): ATR-Multiplikator", min: 0.5, max: 50.0)
+  // Ebene 2: Schwelle = Schwelle von Ebene 1 * Faktor. Weil beide Ebenen an
+  // der ATR des Chart-Timeframes haengen, funktioniert das auf jedem Timeframe
+  // und Ebene 2 ist immer groeber als Ebene 1.
+  level2Factor = input.float(3.0, title: "Ebene 2 (gross): Faktor zu Ebene 1", min: 1.5, max: 20.0)
   // Ungueltige (gebrochene) Zaehlungen grau sichtbar lassen
   showInvalid = input.bool(true, title: "Ungueltige Zaehlungen anzeigen")
   // Eigenstaendige Korrekturen A-B-C und W-X-Y erkennen und beschriften
@@ -659,14 +660,14 @@ state (
 
 fn waveName2(n: int) -> string {
   return match n {
-    1 => "①"
-    2 => "②"
-    3 => "③"
-    4 => "④"
-    5 => "⑤"
-    6 => "ⓐ"
-    7 => "ⓑ"
-    _ => "ⓒ"
+    1 => "[1]"
+    2 => "[2]"
+    3 => "[3]"
+    4 => "[4]"
+    5 => "[5]"
+    6 => "[a]"
+    7 => "[b]"
+    _ => "[c]"
   }
 }
 
@@ -741,7 +742,7 @@ fn markCorrection2(t: time) {
     let t0 = cntT2[n - 1]
     if p != null && y != null && tt != null && pp != null && t0 != null {
       let yc = p + (y - p) * 2.2
-      let name = n == 1 ? "Ⓐ" : n == 2 ? "Ⓑ" : "Ⓒ"
+      let name = n == 1 ? "[A]" : n == 2 ? "[B]" : "[C]"
       labels.get("C", 2, countId2, n).set(tt, yc, name, color: colCorr, size: (labelSize + 4.0))
       lines.get("CW", 2, countId2, n).set(t0, pp, tt, p, width: 2.5, color: colCorr, zIndex: 1)
     }
@@ -758,9 +759,9 @@ fn markCorrection2(t: time) {
       // X liegt auf P0 der zweiten Korrektur; Label auf der Gegenseite
       let off = math.abs(pcEndY2 - pcEndP2)
       let yx = bull ? p0 - off * 2.2 : p0 + off * 2.2
-      labels.get("WXY", 2, pcId2, 1).set(wt, pcEndP2 + (pcEndY2 - pcEndP2) * 3.6, "Ⓦ", color: colCombo, size: (labelSize + 4.0) + 2.0)
-      labels.get("WXY", 2, pcId2, 2).set(t0c, yx, "Ⓧ", color: colCombo, size: (labelSize + 4.0) + 2.0)
-      labels.get("WXY", 2, pcId2, 3).set(t3, p3 + (y3 - p3) * 3.6, "Ⓨ", color: colCombo, size: (labelSize + 4.0) + 2.0)
+      labels.get("WXY", 2, pcId2, 1).set(wt, pcEndP2 + (pcEndY2 - pcEndP2) * 3.6, "[W]", color: colCombo, size: (labelSize + 4.0) + 2.0)
+      labels.get("WXY", 2, pcId2, 2).set(t0c, yx, "[X]", color: colCombo, size: (labelSize + 4.0) + 2.0)
+      labels.get("WXY", 2, pcId2, 3).set(t3, p3 + (y3 - p3) * 3.6, "[Y]", color: colCombo, size: (labelSize + 4.0) + 2.0)
       lastPattern2 = str.concat("W-X-Y ", dirTxt)
       patternDone.trigger(PatternPayload { level: 2, pattern: "W-X-Y", price: p3, direction: dirTxt })
     }
@@ -934,7 +935,7 @@ fn invalidationLevel2() -> float? {
 
 // Ein bestaetigter Bar fuer diese Ebene: ZigZag, Zaehlung, vorlaeufiger Schenkel.
 fn step2(t: time, h: float, l: float, i: int, atrV: float) {
-  let thr = atrV * atrMult2
+  let thr = atrV * (atrMult * level2Factor)
 
   // ================= ZigZag =================
   let newPivot = false

@@ -8,8 +8,8 @@ ftr=open(os.path.join(d,"src","footer.mm")).read()
 levels=[
  dict(S="1",L="1",MULT="atrMult",OFF="0.35",SIZE="labelSize",W1="1.0",W2="1.5",XSIZE="12.0",LNAME="Ebene 1",
       N1="1",N2="2",N3="3",N4="4",N5="5",Na="a",Nb="b",Nc="c",NA="A",NB="B",NC="C",NW="W",NX="X",NY="Y"),
- dict(S="2",L="2",MULT="atrMult2",OFF="0.9",SIZE="(labelSize + 4.0)",W1="1.5",W2="2.5",XSIZE="16.0",LNAME="Ebene 2",
-      N1="①",N2="②",N3="③",N4="④",N5="⑤",Na="ⓐ",Nb="ⓑ",Nc="ⓒ",NA="Ⓐ",NB="Ⓑ",NC="Ⓒ",NW="Ⓦ",NX="Ⓧ",NY="Ⓨ"),
+ dict(S="2",L="2",MULT="(atrMult * level2Factor)",OFF="0.9",SIZE="(labelSize + 4.0)",W1="1.5",W2="2.5",XSIZE="16.0",LNAME="Ebene 2",
+      N1="[1]",N2="[2]",N3="[3]",N4="[4]",N5="[5]",Na="[a]",Nb="[b]",Nc="[c]",NA="[A]",NB="[B]",NC="[C]",NW="[W]",NX="[X]",NY="[Y]"),
 ]
 out=hdr
 for L in levels:

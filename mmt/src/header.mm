@@ -3,7 +3,7 @@ script "Elliott Wave Counter (ATR ZigZag)"
 // ============================================================
 //  Elliott-Wave-Zaehler mit zwei unabhaengigen Wellenebenen:
 //    Ebene 1 (klein): 1-5, a-b-c, A-B-C, W-X-Y
-//    Ebene 2 (gross): (1)-(5) eingekreist, Ⓐ-Ⓑ-Ⓒ, Ⓦ-Ⓧ-Ⓨ
+//    Ebene 2 (gross): [1]-[5], [a]-[c], [A]-[C], [W]-[X]-[Y]
 //  Jede Ebene hat ihren eigenen ATR-ZigZag und zaehlt nach denselben
 //  Regeln: Impuls 1-5, danach a-b-c. Eigenstaendige Zigzag-Korrekturen
 //  A-B-C stehen erst fest, wenn "Welle 4" das Gebiet von "Welle 1"
@@ -24,9 +24,10 @@ input (
   atrMult = input.float(3.0, title: "Ebene 1 (klein): ATR-Multiplikator", min: 0.5, max: 50.0)
   // Ebene 2 ein/aus
   showLevel2 = input.bool(true, title: "Ebene 2 (gross) anzeigen")
-  // Ebene 2: deutlich groesser als Ebene 1 waehlen. 15 trifft auf 5m die
-  // grossen Wellen (Hauptpivots) einer typischen Analysten-Zaehlung.
-  atrMult2 = input.float(15.0, title: "Ebene 2 (gross): ATR-Multiplikator", min: 0.5, max: 50.0)
+  // Ebene 2: Schwelle = Schwelle von Ebene 1 * Faktor. Weil beide Ebenen an
+  // der ATR des Chart-Timeframes haengen, funktioniert das auf jedem Timeframe
+  // und Ebene 2 ist immer groeber als Ebene 1.
+  level2Factor = input.float(3.0, title: "Ebene 2 (gross): Faktor zu Ebene 1", min: 1.5, max: 20.0)
   // Ungueltige (gebrochene) Zaehlungen grau sichtbar lassen
   showInvalid = input.bool(true, title: "Ungueltige Zaehlungen anzeigen")
   // Eigenstaendige Korrekturen A-B-C und W-X-Y erkennen und beschriften
