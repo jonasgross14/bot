@@ -44,7 +44,9 @@ input (
   colCombo = input.color(color.rgb(171, 71, 188), title: "Farbe W-X-Y")
 )
 
-data chart = subscribe(data.ohlcv)
+// 14 Tage Historie laden, damit auch grosse Wellen vor dem sichtbaren
+// Bereich gezaehlt werden (der Chart laedt sonst oft nur wenige Tage).
+data chart = subscribe(data.ohlcv, history: 14D)
 
 type WavePayload {
   level: int
